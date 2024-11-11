@@ -1,3 +1,6 @@
+import numpy as np
+from typing import Tuple, List, Dict
+
 class FusionModule:
     """
     Classe pour fusionner les résultats des deux pipelines de colorisation.

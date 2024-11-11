@@ -1,14 +1,20 @@
+from AttentionModel import AttentionPointsModel
+from ColorizationModel import ColorizationModel
+from FusionModule import FusionModule
+import numpy as np
+from typing import List, Dict
+
 class InferencePipeline:
     """
     Classe pour gérer le processus d'inférence sur de nouvelles images.
     """
 
-    def __init__(self, attention_model: AttentionModel, primary_model: ColorizationModel, secondary_model: ColorizationModel, fusion_module: FusionModule):
+    def __init__(self, attention_model: AttentionPointsModel, primary_model: ColorizationModel, secondary_model: ColorizationModel, fusion_module: FusionModule):
         """
         Initialise le pipeline d'inférence avec les modèles et le module de fusion.
 
         Arguments:
-        - attention_model (AttentionModel): Modèle d'attention chargé.
+        - attention_model (AttentionPointsModel): Modèle d'attention chargé.
         - primary_model (ColorizationModel): Modèle de colorisation principal chargé.
         - secondary_model (ColorizationModel): Modèle de colorisation secondaire chargé.
         - fusion_module (FusionModule): Module de fusion initialisé.

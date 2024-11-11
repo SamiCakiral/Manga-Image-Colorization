@@ -1,3 +1,5 @@
+import torch
+
 class ColorizationModel(torch.nn.Module):
     """
     Modèle de colorisation pour les zones importantes et les chutes.

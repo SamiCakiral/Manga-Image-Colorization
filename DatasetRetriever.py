@@ -11,6 +11,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
 from multiprocessing import Pool, cpu_count, Manager, Lock
+from typing import Tuple, List, Optional
 
 class DatasetRetriever:
     """

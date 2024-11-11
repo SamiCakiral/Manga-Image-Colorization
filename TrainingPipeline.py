@@ -3,7 +3,8 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import os
 from config import config
-
+from PIL import Image
+from ChuteProcessor import ChuteProcessor
 from AttentionModel import AttentionPointsModel
 from ColorizationModel import ColorizationModel
 from DatasetLoader import DatasetLoader
@@ -118,43 +119,54 @@ class TrainingPipeline:
         - save_dir (str): Répertoire où sauvegarder les patches.
         """
         os.makedirs(save_dir, exist_ok=True)
-        os.makedirs(os.path.join(save_dir, 'primary'), exist_ok=True)
-        os.makedirs(os.path.join(save_dir, 'secondary'), exist_ok=True)
+        primary_save_dir = os.path.join(save_dir, 'primary')
+        secondary_save_dir = os.path.join(save_dir, 'secondary')
+        chutes_save_dir = os.path.join(save_dir, 'chutes')
+
+        os.makedirs(primary_save_dir, exist_ok=True)
+        os.makedirs(secondary_save_dir, exist_ok=True)
+        os.makedirs(chutes_save_dir, exist_ok=True)
+
+        chute_processor = ChuteProcessor()
 
         for idx in tqdm(range(len(dataset_loader)), desc="Extraction et sauvegarde des patches"):
             sample = dataset_loader[idx]
-            bw_image = sample['bw_image']
-            color_image = sample['color_image']
-            image_id = os.path.splitext(sample['metadata']['source_path'])[0]
+            bw_image = sample['bw_image'].numpy().transpose(1, 2, 0)  # Convertir en HWC
+            color_image = sample['color_image'].numpy().transpose(1, 2, 0)
+            image_id = f"image_{idx:05d}"
 
             # Charger le masque d'attention
             attention_map_path = f'{config.attention_maps_dir}/{image_id}_attention_map.pt'
             if not os.path.exists(attention_map_path):
                 continue
-            attention_map = torch.load(attention_map_path)
+            attention_map = torch.load(attention_map_path).numpy()
 
             # Extraire les patches
-            patches = patch_extractor.extract_patches(bw_image.numpy(), attention_map.numpy())
+            patches = patch_extractor.extract_patches(bw_image, attention_map)
 
-            # Sauvegarder les patches
+            # Traiter les chutes
+            chutes = chute_processor.process_chutes(patches)
+
+            # Sauvegarder les patches importants et secondaires
             for i, patch_info in enumerate(patches):
-                patch_image = patch_info['patch']
-                coordinates = patch_info['coordinates']
                 patch_type = patch_info['type']
-
                 if patch_type == 'important':
-                    patch_save_dir = os.path.join(save_dir, 'primary')
+                    save_path = primary_save_dir
+                elif patch_type == 'background':
+                    save_path = secondary_save_dir
                 else:
-                    patch_save_dir = os.path.join(save_dir, 'secondary')
-                os.makedirs(patch_save_dir, exist_ok=True)
+                    continue  # Ignorer les autres types
 
-                patch_filename = f"{image_id}_patch_{i}.pt"
-                torch.save({
-                    'bw_patch': torch.from_numpy(patch_image['bw']),
-                    'color_patch': torch.from_numpy(patch_image['color']),
-                    'coordinates': coordinates,
-                    'original_image_id': image_id
-                }, os.path.join(patch_save_dir, patch_filename))
+                patch = patch_info['patch']
+                x, y, w, h = patch_info['coordinates']
+
+                # Sauvegarder le patch
+                filename = f"{image_id}_patch_{i}_{x}_{y}.png"
+                patch_image = Image.fromarray(patch)
+                patch_image.save(os.path.join(save_path, filename))
+
+            # Sauvegarder les chutes
+            chute_processor.save_chutes(chutes, chutes_save_dir)
 
     def train_colorization_models(self, primary_dataloader: DataLoader, secondary_dataloader: DataLoader, epochs: int, lr: float):
         """
