@@ -162,16 +162,24 @@ class Config:
 
     def _load_config(self, config_name: str) -> Dict[str, Any]:
         """Charge un fichier de configuration et ses dépendances."""
-        # Chercher d'abord dans experiment_configs
-        config_path = self.config_dir / "experiment_configs" / f"{config_name}.yaml"
-        if not config_path.exists():
-            # Si non trouvé, chercher dans le dossier principal
-            config_path = self.config_dir / f"{config_name}.yaml"
+        # Pour la configuration par défaut, chercher directement default_config.yaml
+        if config_name == "default":
+            config_path = self.config_dir / "default_config.yaml"
+        else:
+            # Chercher d'abord dans experiment_configs
+            config_path = self.config_dir / "experiment_configs" / f"{config_name}.yaml"
             if not config_path.exists():
-                raise ConfigurationError(f"Configuration '{config_name}' non trouvée")
+                # Si non trouvé, chercher dans le dossier principal
+                config_path = self.config_dir / f"{config_name}.yaml"
         
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
+        if not config_path.exists():
+            raise ConfigurationError(f"Configuration '{config_name}' non trouvée dans {config_path}")
+        
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+        except Exception as e:
+            raise ConfigurationError(f"Erreur lors du chargement de la configuration: {str(e)}")
             
         # Gérer l'héritage
         if 'inherit' in config:

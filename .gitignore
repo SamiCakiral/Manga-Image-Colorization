@@ -1,0 +1,57 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Benchmarks
+benchmarks/
+*.benchmark
+
+.coverage
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Virtual Environment
+venv/
+env/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Dataset et données
+data/
+dataset/
+*/dataset/
+*/data/
+*.zip
+*.cbz
+*.png
+*.jpg
+*.jpeg
+
+# Dossiers spécifiques au projet
+**/source/
+**/metadata/
+**/temp_cbz/
+**/cbz_files/
+**/training/
+**/inference/
+
+# Fichiers de métadonnées
+dataset_info.json
+*.json
+
+# Dossiers temporaires
+temp/
+tmp/
+

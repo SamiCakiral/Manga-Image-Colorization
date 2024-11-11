@@ -9,28 +9,27 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.data.dataset_retriever import DatasetRetriever
 from src.data.dataset_loader import DatasetLoader
+from src.utils.config import config
 
 def test_pipeline():
     print("=== Test de la pipeline de données ===")
     
     # Configuration minimale pour le test
-    config = {
+    test_config = {
         'data': {
             'training_dataset': {
-                'gdrive_url': "https://drive.google.com/file/d/1RWt9kawzXyIvvZWDmEv9e4QrXpqbgac0/view?usp=share_link",
-                'target_images': 5000
+                'gdrive_url': config.config['data']['inference_dataset']['gdrive_url'],  # Notation dictionnaire
+                'target_images': config.config['data']['inference_dataset']['target_images']
             },
-            'inference_dataset': {
-                'gdrive_url': "https://drive.google.com/file/d/1F9YwjozTfhTLugxX-GKQc7hnkhy7JusG/view?usp=share_link",
-                'target_images': 100
-            },
+            'inference_dataset': config.config['data']['inference_dataset'],
             'validation_split': 0.2
-        }
+        },
+        'paths': config.config['paths']
     }
     
-    # Créer et préparer le dataset d'inférence pour le test
-    print("\n📥 Test avec le dataset d'inférence (plus petit)...")
-    retriever = DatasetRetriever(config=config, dataset_type='inference')
+    # Créer et préparer le dataset
+    print("\n📥 Test de préparation du dataset...")
+    retriever = DatasetRetriever(config=test_config, dataset_type='training')  # Utiliser comme dataset d'entraînement
     total_images = retriever.prepare_dataset()
     print(f"\nNombre d'images préparées: {total_images}")
     
@@ -42,9 +41,10 @@ def test_pipeline():
         ])
         
         dataset = DatasetLoader(
-            config=config,
+            config=test_config,
             transform=transform,
-            dataset_type='inference'
+            dataset_type='training',  # Utiliser comme dataset d'entraînement
+            split='train'  # On peut maintenant utiliser le split train/val
         )
         
         print(f"\nTaille du dataset: {len(dataset)}")
@@ -57,6 +57,15 @@ def test_pipeline():
             print(f"- Couleur: {sample['color_image'].shape}")
             print("\nMétadonnées de l'image:")
             print(sample['metadata'])
+            
+            # Test du split de validation
+            val_dataset = DatasetLoader(
+                config=test_config,
+                transform=transform,
+                dataset_type='training',
+                split='val'
+            )
+            print(f"\nTaille du dataset de validation: {len(val_dataset)}")
 
 if __name__ == "__main__":
     test_pipeline() 

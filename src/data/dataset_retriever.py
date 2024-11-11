@@ -49,30 +49,37 @@ class DatasetRetriever:
 
         # Variables pour le traitement
         self.image_counter = 0
-        self.counter_lock = threading.Lock()
         self.stop_processing = False
         self.num_workers = multiprocessing.cpu_count()
-        self.manager = Manager()
-        self.total_images_processed = self.manager.Value('i', 0)
-        self.total_lock = self.manager.Lock()
-        self.pbar = tqdm(total=self.target_images, desc="Images traitées")
-
-        # Configuration du traitement des images
-        self.target_size = (1024, 1024)
-        self.quality_threshold = 50  # Seuil minimal de qualité (KB)
-        self.num_processes = cpu_count()  # Nombre de processus pour l'extraction
+        self.num_processes = cpu_count()
 
     def download_and_extract(self) -> bool:
         """
         Télécharge et extrait le fichier zip contenant les données.
+        Vérifie d'abord si les données sont déjà extraites.
 
         Retourne:
-        - success (bool): True si le téléchargement et l'extraction ont réussi, False sinon.
+            bool: True si le téléchargement et l'extraction ont réussi, False sinon.
         """
-        # Vérification si le fichier existe déjà
+        # Vérifier si les données sont déjà extraites
+        if os.path.exists(self.cbz_extract_path) and os.listdir(self.cbz_extract_path):
+            print("📂 Les fichiers CBZ sont déjà extraits")
+            return True
+
+        # Vérification si le fichier zip existe déjà
         if os.path.exists(self.master_zip_path):
-            print("📦 Le fichier master.zip existe déjà")
-            print(f"Taille du fichier: {os.path.getsize(self.master_zip_path) / 1024 / 1024:.2f} MB")
+            zip_size = os.path.getsize(self.master_zip_path) / (1024 * 1024)  # Taille en MB
+            print(f"📦 Le fichier master.zip existe déjà ({zip_size:.2f} MB)")
+            
+            # Vérifier si le fichier n'est pas corrompu
+            try:
+                with zipfile.ZipFile(self.master_zip_path, 'r') as zip_ref:
+                    zip_ref.testzip()
+                print("✅ Le fichier zip est valide")
+            except Exception as e:
+                print(f"⚠️  Le fichier zip est corrompu, nouveau téléchargement nécessaire: {str(e)}")
+                os.remove(self.master_zip_path)
+                return self.download_and_extract()
         else:
             print("📥 Téléchargement du master zip...")
             try:
@@ -85,7 +92,7 @@ class DatasetRetriever:
             print("❌ Échec du téléchargement")
             return False
 
-        print(f"✅ Téléchargement terminé: {os.path.getsize(self.master_zip_path) / 1024 / 1024:.2f} MB")
+        print(f"✅ Fichier zip prêt: {os.path.getsize(self.master_zip_path) / (1024 * 1024):.2f} MB")
 
         print("\n📦 Extraction des fichiers CBZ...")
         os.makedirs(self.cbz_extract_path, exist_ok=True)
@@ -94,6 +101,7 @@ class DatasetRetriever:
             with zipfile.ZipFile(self.master_zip_path, 'r') as zip_ref:
                 zip_ref.extractall(self.cbz_extract_path)
             print("✅ Extraction terminée")
+            # Supprimer le zip après extraction réussie
             os.remove(self.master_zip_path)
             return True
 
@@ -248,19 +256,25 @@ class DatasetRetriever:
         print(f"\nCréation d'un dataset avec {self.target_images} images...")
         print(f"Utilisation de {self.num_processes} processus pour l'extraction")
 
+        # Initialiser les variables de suivi ici
+        self.counter_lock = threading.Lock()
+        self.manager = Manager()
+        self.total_images_processed = self.manager.Value('i', 0)
+        self.total_lock = self.manager.Lock()
+        self.pbar = tqdm(total=self.target_images, desc="Images traitées")
+
         cbz_files = [os.path.join(self.cbz_extract_path, f)
                      for f in os.listdir(self.cbz_extract_path)
                      if f.lower().endswith('.cbz')]
 
-        with Pool(processes=self.num_processes) as pool:
-            temp_dirs = list(tqdm(
-                pool.imap(self.extract_cbz_wrapper, cbz_files),
-                total=len(cbz_files),
-                desc="Extraction des tomes"
-            ))
+        # Utiliser une approche séquentielle pour l'extraction des CBZ
+        temp_dirs = []
+        for cbz_file in tqdm(cbz_files, desc="Extraction des tomes"):
+            temp_dir = self.extract_cbz_wrapper(cbz_file)
+            if temp_dir:
+                temp_dirs.append(temp_dir)
 
-        temp_dirs = [d for d in temp_dirs if d is not None]
-
+        # Traitement des images
         for temp_dir in tqdm(temp_dirs, desc="Traitement des tomes"):
             if self.stop_processing:
                 break
@@ -272,11 +286,14 @@ class DatasetRetriever:
             finally:
                 shutil.rmtree(temp_dir, ignore_errors=True)
 
-        self.pbar.close()
+        if self.pbar:
+            self.pbar.close()
 
-        # Sauvegarde des métadonnées du dataset
+        # Sauvegarde des métadonnées
+        total_processed = self.total_images_processed.value if hasattr(self.total_images_processed, 'value') else self.total_images_processed
+        
         dataset_metadata = {
-            'total_images': self.total_images_processed.value,
+            'total_images': total_processed,
             'creation_date': os.path.getctime(self.dataset_dir),
             'structure_version': '2.0',
             'paths': {k: os.path.relpath(v, self.dataset_dir) for k, v in self.paths.items()}
@@ -286,14 +303,14 @@ class DatasetRetriever:
             json.dump(dataset_metadata, f, indent=4)
 
         print(f"\n✅ Traitement terminé !")
-        print(f"Nombre total d'images traitées : {self.total_images_processed.value}")
+        print(f"Nombre total d'images traitées : {total_processed}")
         print(f"Dataset créé dans : {self.dataset_dir}")
 
         # Nettoyage final
         shutil.rmtree(self.cbz_extract_path, ignore_errors=True)
         shutil.rmtree(self.paths['temp'], ignore_errors=True)
 
-        return self.total_images_processed.value
+        return total_processed
 
     def prepare_dataset(self) -> int:
         """
