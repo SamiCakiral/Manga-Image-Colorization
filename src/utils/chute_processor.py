@@ -1,6 +1,6 @@
 import numpy as np
 from typing import List, Dict
-from config import config
+from ..utils.config import config
 
 class ChuteProcessor:
     """

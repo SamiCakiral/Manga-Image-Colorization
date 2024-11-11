@@ -39,8 +39,20 @@ class InferencePipeline:
         Retourne:
         - colorized_image (np.ndarray): Image colorisée finale de dimensions (H, W, 3).
         """
-        # Préparation de l'image
-        bw_tensor = torch.from_numpy(bw_image).unsqueeze(0).unsqueeze(0).float().to(self.device) / 255.0  # (1, 1, H, W)
+        # Validation des entrées
+        if bw_image is None:
+            raise ValueError("L'image d'entrée ne peut pas être None")
+        
+        if not isinstance(bw_image, np.ndarray):
+            raise TypeError("L'image d'entrée doit être un numpy.ndarray")
+        
+        if bw_image.ndim != 2:
+            raise ValueError("L'image d'entrée doit être en niveaux de gris (2D)")
+        
+        # Conversion et normalisation
+        bw_tensor = torch.from_numpy(bw_image).unsqueeze(0).unsqueeze(0).float()
+        bw_tensor = bw_tensor.to(self.device) / 255.0
+        
         H, W = bw_image.shape
         
         # Génération du masque d'attention

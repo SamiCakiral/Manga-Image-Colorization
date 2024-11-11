@@ -17,7 +17,12 @@ class Config:
         Args:
             config_name: Nom de la configuration à charger (sans extension .yaml)
         """
-        self.config_dir = Path(__file__).parent.parent.parent / "configs"
+        self.root_dir = Path(__file__).parent.parent.parent.absolute()
+        self.config_dir = self.root_dir / "configs"
+        
+        if not self.config_dir.exists():
+            raise FileNotFoundError(f"Répertoire de configuration non trouvé: {self.config_dir}")
+        
         self.config_name = config_name
         self.config = self._load_config(config_name)
         self._process_config()

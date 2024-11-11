@@ -3,7 +3,7 @@ import torch
 from torch.utils.data import Dataset
 from PIL import Image
 import json
-
+from typing import Dict
 class DatasetLoader(Dataset):
     """
     Classe pour gérer le chargement des datasets pour l'entraînement et l'inférence.

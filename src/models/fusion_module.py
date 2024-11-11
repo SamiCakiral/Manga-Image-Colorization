@@ -31,33 +31,21 @@ class FusionModule:
         fused_image = np.zeros((H, W, 3), dtype=np.float32)
         weight_map = np.zeros((H, W), dtype=np.float32)
         
-        # Fusion des patches du modèle principal
-        for output in primary_outputs:
-            patch = output['patch']
-            x, y, w, h = output['coordinates']
-            weight = self._create_weight_mask((h, w))
-            
-            fused_image[y:y+h, x:x+w, :] += patch * weight[..., None]
-            weight_map[y:y+h, x:x+w] += weight
+        # Fusion des patches
+        for outputs in [primary_outputs, secondary_outputs]:
+            for output in outputs:
+                patch = output['patch']
+                x, y, w, h = output['coordinates']
+                weight = self._create_weight_mask((h, w))
+                
+                fused_image[y:y+h, x:x+w] += patch * weight[..., None]
+                weight_map[y:y+h, x:x+w] += weight
         
-        # Fusion des patches du modèle secondaire
-        for output in secondary_outputs:
-            patch = output['patch']
-            x, y, w, h = output['coordinates']
-            weight = self._create_weight_mask((h, w))
-            
-            fused_image[y:y+h, x:x+w, :] += patch * weight[..., None]
-            weight_map[y:y+h, x:x+w] += weight
+        # Normalisation
+        weight_map = np.maximum(weight_map, 1e-10)
+        fused_image /= weight_map[..., None]
         
-        # Éviter la division par zéro
-        weight_map = np.clip(weight_map, a_min=1e-5, a_max=None)
-        
-        fused_image = fused_image / weight_map[..., None]
-        
-        # Gérer les valeurs en dehors de [0, 1]
-        fused_image = np.clip(fused_image, 0, 1)
-        
-        return fused_image
+        return np.clip(fused_image, 0, 1)
     
     def _create_weight_mask(self, size: Tuple[int, int]) -> np.ndarray:
         """

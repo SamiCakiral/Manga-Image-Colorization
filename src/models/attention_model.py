@@ -138,6 +138,96 @@ class AttentionPointsModel(nn.Module):
         
         return complexity
     
+    @staticmethod
+    def compute_structural_complexity(image):
+        """Calcule la complexité structurelle de l'image en utilisant les gradients de Sobel.
+        
+        Arguments:
+            image (torch.Tensor): Image d'entrée (B, C, H, W)
+            
+        Retourne:
+            torch.Tensor: Carte de complexité structurelle (B, 1, H, W)
+        """
+        # Conversion en niveaux de gris avec coefficients ITU-R BT.601
+        grayscale = 0.299 * image[:,0,:,:] + 0.587 * image[:,1,:,:] + 0.114 * image[:,2,:,:]
+        grayscale = grayscale.unsqueeze(1)
+        
+        # Noyaux de Sobel pré-calculés
+        sobel_x = torch.tensor([[[[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]]]], dtype=image.dtype)
+        sobel_y = torch.tensor([[[[-1, -2, -1], [0, 0, 0], [1, 2, 1]]]], dtype=image.dtype)
+        
+        # Application des filtres de Sobel
+        grad_x = F.conv2d(grayscale, weight=sobel_x.to(image.device), padding=1)
+        grad_y = F.conv2d(grayscale, weight=sobel_y.to(image.device), padding=1)
+        
+        # Magnitude du gradient avec normalisation
+        gradients = torch.sqrt(grad_x.pow(2) + grad_y.pow(2))
+        gradients = gradients / gradients.max()
+        
+        return gradients
+    
+    @staticmethod
+    def compute_transition_complexity(image):
+        """Calcule la complexité des transitions de luminosité dans l'image.
+        
+        Arguments:
+            image (torch.Tensor): Image d'entrée (B, C, H, W)
+            
+        Retourne:
+            torch.Tensor: Carte de complexité des transitions (B, 1, H, W)
+        """
+        # Conversion en luminance avec coefficients ITU-R BT.601
+        luminance = 0.299 * image[:,0,:,:] + 0.587 * image[:,1,:,:] + 0.114 * image[:,2,:,:]
+        
+        # Calcul des différences horizontales et verticales
+        delta_h = torch.abs(luminance[:, :, 1:] - luminance[:, :, :-1])
+        delta_v = torch.abs(luminance[:, 1:, :] - luminance[:, :-1, :])
+        
+        # Padding pour restaurer les dimensions
+        delta_h = F.pad(delta_h, (0, 1, 0, 0))
+        delta_v = F.pad(delta_v, (0, 0, 0, 1))
+        
+        # Combinaison des transitions
+        transitions = torch.maximum(delta_h, delta_v).unsqueeze(1)
+        transitions = transitions / transitions.max()
+        
+        return transitions
+    
+    @staticmethod
+    def compute_semantic_complexity(image):
+        """Calcule la complexité sémantique de l'image.
+        
+        Arguments:
+            image (torch.Tensor): Image d'entrée (B, C, H, W)
+            
+        Retourne:
+            torch.Tensor: Carte de complexité sémantique (B, 1, H, W)
+        """
+        # Utilisation de DeepLabV3 pré-entraîné pour la segmentation
+        model = torch.hub.load('pytorch/vision:v0.10.0', 'deeplabv3_resnet50', pretrained=True)
+        model.eval()
+        model = model.to(image.device)
+        
+        # Normalisation de l'image pour le modèle
+        mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(image.device)
+        std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(image.device)
+        normalized_image = (image - mean) / std
+        
+        with torch.no_grad():
+            # Obtenir les prédictions de segmentation
+            output = model(normalized_image)['out']
+            
+            # Calculer la diversité des classes par pixel
+            probs = torch.softmax(output, dim=1)
+            entropy = -torch.sum(probs * torch.log(probs + 1e-10), dim=1, keepdim=True)
+            
+            # Normaliser l'entropie
+            semantic_complexity = entropy / torch.log(torch.tensor(output.shape[1]))
+            semantic_complexity = semantic_complexity / semantic_complexity.max()
+        
+        return semantic_complexity
+        
+    
     def train_step(self, batch, optimizer, criterion):
         """
         Une étape d'entraînement.

@@ -22,7 +22,7 @@ class TrainingPipeline:
                  attention_model: AttentionPointsModel, 
                  primary_model: ColorizationModel, 
                  secondary_model: ColorizationModel, 
-                 device=config.device):
+                 device=config.training['device']):
         """
         Initialise le pipeline d'entraînement avec les modèles fournis.
 
