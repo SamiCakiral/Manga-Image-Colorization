@@ -1,0 +1,53 @@
+# Configuration de base
+name: "default"
+description: "Configuration par défaut"
+
+# Chemins des données
+paths:
+  dataset_dir: "/content/dataset/"
+  bw_dir: "${dataset_dir}/source/bw"
+  color_dir: "${dataset_dir}/source/color"
+  metadata_dir: "${dataset_dir}/metadata"
+  attention_maps_dir: "${dataset_dir}/attention_maps"
+  patches_dir: "${dataset_dir}/patches"
+  models_dir: "models"
+
+# Configuration du modèle
+model:
+  vit:
+    model_name: "vit_b_16"
+    pretrained: true
+    feature_size: 768
+  attention:
+    max_points: 32
+    head_hidden: 512
+    gaussian_sigma: 42.67  # 128/3
+  patch:
+    size: 256
+    overlap: 32
+
+# Configuration de l'entraînement
+training:
+  batch_size: 8
+  learning_rate: 1e-4
+  num_epochs: 50
+  device: "cuda"  # sera automatiquement géré par le code
+  optimizer:
+    type: "adam"
+    beta1: 0.9
+    beta2: 0.999
+  scheduler:
+    type: "cosine"
+    warmup_epochs: 5
+
+# Configuration des métriques
+metrics:
+  structural_weight: 0.7
+  transition_weight: 0.3
+  quality_threshold: 50
+
+# Configuration du preprocessing
+preprocessing:
+  target_size: [1024, 1024]
+  normalize: true
+  augmentation: true

@@ -1,0 +1,14 @@
+name: "fast_training"
+description: "Configuration pour l'entraînement rapide"
+
+inherit: "default"
+
+model:
+  patch:
+    size: 128
+    overlap: 16
+
+training:
+  batch_size: 32
+  num_epochs: 20
+  learning_rate: 2e-4 

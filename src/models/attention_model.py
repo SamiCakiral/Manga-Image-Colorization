@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
-from config import config
+from utils.config import config
 
 class AttentionPointsModel(nn.Module):
     """Cette classe est un modèle d'attention qui prédit des points clés pour guider le découpage intelligent. 
