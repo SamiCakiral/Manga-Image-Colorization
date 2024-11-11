@@ -55,7 +55,10 @@ preprocessing:
 
 # Configuration des données de validation
 data:
-  bw_dir: "/content/dataset/source/bw"
-  color_dir: "/content/dataset/source/color"
-  metadata_dir: "/content/dataset/metadata"
+  training_dataset:
+    gdrive_url: "https://drive.google.com/file/d/1RWt9kawzXyIvvZWDmEv9e4QrXpqbgac0/view?usp=share_link"
+    target_images: 5000  # Nombre d'images souhaité pour l'entraînement
+  inference_dataset:
+    gdrive_url: "https://drive.google.com/file/d/1F9YwjozTfhTLugxX-GKQc7hnkhy7JusG/view?usp=share_link"
+    target_images: 100  # Nombre d'images souhaité pour l'inférence
   validation_split: 0.2  # 20% des données pour la validation

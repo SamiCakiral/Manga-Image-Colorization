@@ -11,45 +11,36 @@ class DatasetLoader(Dataset):
     Classe pour gérer le chargement des datasets pour l'entraînement et l'inférence.
     """
     def __init__(self, 
-                 bw_dir: str, 
-                 color_dir: str, 
-                 metadata_dir: str, 
+                 config: dict,
                  transform=None, 
-                 split: str = 'train',
-                 test_size: float = 0.2,
-                 random_state: int = 42):
+                 dataset_type: str = 'training',
+                 split: str = 'train'):
         """
         Initialise le DatasetLoader.
 
         Arguments:
-        - bw_dir (str): Chemin vers les images noir et blanc.
-        - color_dir (str): Chemin vers les images colorées correspondantes.
-        - metadata_dir (str): Chemin vers les métadonnées des images.
-        - transform (callable, optional): Transformations à appliquer aux images.
-        - split (str): 'train' ou 'val' pour choisir l'ensemble de données.
-        - test_size (float): Proportion de l'ensemble de validation.
-        - random_state (int): Seed pour le random split.
+        - config (dict): Configuration contenant les paramètres du dataset
+        - transform (callable, optional): Transformations à appliquer aux images
+        - dataset_type (str): 'training' ou 'inference' pour choisir le dataset
+        - split (str): 'train' ou 'val' pour choisir l'ensemble de données
         """
-        self.bw_dir = bw_dir
-        self.color_dir = color_dir
-        self.metadata_dir = metadata_dir
+        base_dir = os.path.join('/content/dataset', dataset_type)
+        self.bw_dir = os.path.join(base_dir, 'source/bw')
+        self.color_dir = os.path.join(base_dir, 'source/color')
+        self.metadata_dir = os.path.join(base_dir, 'metadata')
         self.transform = transform
 
         self.image_ids = [os.path.splitext(f)[0] for f in os.listdir(self.bw_dir) if f.endswith('.png')]
 
-        # Division en ensembles d'entraînement et de validation
-        train_ids, val_ids = train_test_split(
-            self.image_ids, 
-            test_size=test_size, 
-            random_state=random_state
-        )
-
-        if split == 'train':
-            self.image_ids = train_ids
-        elif split == 'val':
-            self.image_ids = val_ids
-        else:
-            raise ValueError("Le paramètre 'split' doit être 'train' ou 'val'.")
+        # Ne faire le split que pour le dataset d'entraînement
+        if dataset_type == 'training':
+            test_size = config['data']['validation_split']
+            train_ids, val_ids = train_test_split(
+                self.image_ids, 
+                test_size=test_size, 
+                random_state=42
+            )
+            self.image_ids = train_ids if split == 'train' else val_ids
 
     def __len__(self) -> int:
         """

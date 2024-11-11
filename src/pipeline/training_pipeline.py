@@ -232,7 +232,7 @@ class TrainingPipeline:
 
         return running_loss / len(dataloader)
 
-    def _validate_colorization_model(self, model: ColorizationModel, dataloader: DataLoader, criterion) -> (float, float):
+    def _validate_colorization_model(self, model: ColorizationModel, dataloader: DataLoader, criterion) -> tuple[float, float]:
         """Valide un modèle de colorisation."""
         model.eval()
         running_loss = 0.0

@@ -18,19 +18,21 @@ class DatasetRetriever:
     Classe pour télécharger, extraire et préparer le dataset à partir d'une source donnée.
     """
 
-    def __init__(self, gdrive_url: str, target_images: int, dataset_dir: str = '/content/dataset/'):
+    def __init__(self, config: dict, dataset_type: str = 'training'):
         """
-        Initialise le DatasetRetriever avec l'URL de Google Drive et le nombre d'images cibles.
+        Initialise le DatasetRetriever avec la configuration.
 
         Arguments:
-        - gdrive_url (str): URL de téléchargement du fichier zip contenant les données.
-        - target_images (int): Nombre d'images à traiter pour le dataset.
-        - dataset_dir (str): Chemin vers le répertoire où le dataset sera stocké.
+        - config (dict): Configuration contenant les paramètres du dataset
+        - dataset_type (str): 'training' ou 'inference' pour choisir le dataset
         """
-        self.gdrive_url = gdrive_url
-        self.target_images = target_images
-        self.dataset_dir = dataset_dir
-
+        dataset_config = config['data'][f'{dataset_type}_dataset']
+        self.gdrive_url = dataset_config['gdrive_url']
+        self.target_images = dataset_config['target_images']
+        
+        # Ajuster le chemin selon le type de dataset
+        self.dataset_dir = os.path.join('/content/dataset', dataset_type)
+        
         # Chemins et structures de répertoires
         self.master_zip_path = os.path.join(self.dataset_dir, 'master.zip')
         self.cbz_extract_path = os.path.join(self.dataset_dir, 'cbz_files')
@@ -53,7 +55,7 @@ class DatasetRetriever:
         self.manager = Manager()
         self.total_images_processed = self.manager.Value('i', 0)
         self.total_lock = self.manager.Lock()
-        self.pbar = tqdm(total=target_images, desc="Images traitées")
+        self.pbar = tqdm(total=self.target_images, desc="Images traitées")
 
         # Configuration du traitement des images
         self.target_size = (1024, 1024)

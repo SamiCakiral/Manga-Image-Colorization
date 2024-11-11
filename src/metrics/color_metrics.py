@@ -3,7 +3,7 @@ import cv2
 from typing import Dict, Tuple
 import torch
 from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
-from ..src.utils.config import config
+from ..utils.config import Config
 
 class ColorMetrics:
     """
@@ -15,9 +15,18 @@ class ColorMetrics:
     """
     
     def __init__(self):
-        """Initialise les métriques de base"""
+        """Initialise les métriques de base avec la configuration"""
+        # Charger la configuration
+        self.config = Config()
         self.psnr = PeakSignalNoiseRatio()
         self.ssim = StructuralSimilarityIndexMeasure()
+        # Charger les poids depuis la configuration
+        self.weights = {
+            'color_accuracy': self.config.metrics['structural_weight'],
+            'transition_coherence': self.config.metrics['transition_weight'],
+            'structural_similarity': 0.20,
+            'signal_quality': 0.10
+        }
         
     def compute_color_accuracy(self, pred: np.ndarray, target: np.ndarray) -> Tuple[float, Dict]:
         """
@@ -171,10 +180,10 @@ class ColorMetrics:
         }
         
         score = (
-            weights['color_accuracy'] * color_score +
-            weights['transition_coherence'] * transition_score +
-            weights['structural_similarity'] * ssim_score +
-            weights['signal_quality'] * psnr_score
+            self.weights['color_accuracy'] * color_score +
+            self.weights['transition_coherence'] * transition_score +
+            self.weights['structural_similarity'] * ssim_score +
+            self.weights['signal_quality'] * psnr_score
         )
         
         details = {
@@ -184,7 +193,7 @@ class ColorMetrics:
                 'ssim': ssim_score,
                 'psnr': psnr_score
             },
-            'weights': weights,
+            'weights': self.weights,
             'color_details': color_details,
             'transition_details': transition_details
         }
