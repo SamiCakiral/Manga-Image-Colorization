@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
+from config import config
 
 class AttentionPointsModel(nn.Module):
     """Cette classe est un modèle d'attention qui prédit des points clés pour guider le découpage intelligent. 
@@ -9,7 +10,7 @@ class AttentionPointsModel(nn.Module):
     Et elle utilise une tête d'attention pour prédire les points d'attention Avec une gaussienne autour du point.
     ViT-B/16 est un modèle de vision transformer pré-entraîné sur ImageNet qui est utilisé pour extraire des features.››
     """
-    def __init__(self, max_points=32):
+    def __init__(self, max_points=config.max_attention_points):
         """
         Initialise le modèle d'attention qui prédit des points clés.
         
@@ -19,13 +20,13 @@ class AttentionPointsModel(nn.Module):
         super(AttentionPointsModel, self).__init__()
         
         # Vision Transformer modifié pour prédire des points
-        self.vit = models.vit_b_16(weights='IMAGENET1K_V1')
+        self.vit = models.vit_b_16(weights='IMAGENET1K_V1' if config.vit_pretrained else None)
         
         # Remplacer la tête de classification par notre tête d'attention
         self.attention_head = nn.Sequential(
-            nn.Linear(768, 512),
+            nn.Linear(config.vit_feature_size, config.attention_head_hidden),
             nn.ReLU(),
-            nn.Linear(512, max_points * 3)  # (x, y, importance_score) pour chaque point
+            nn.Linear(config.attention_head_hidden, max_points * 3)  # (x, y, importance_score) pour chaque point
         )
         
         self.max_points = max_points
@@ -60,7 +61,7 @@ class AttentionPointsModel(nn.Module):
         
         return points, scores
         
-    def get_attention_patches(self, image, points, scores, patch_size=256):
+    def get_attention_patches(self, image, points, scores, patch_size=config.patch_size):
         """
         Génère des patches de 256x256 autour des points d'attention.
         

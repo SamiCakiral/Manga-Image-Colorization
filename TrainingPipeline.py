@@ -2,6 +2,7 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import os
+from config import config
 
 from AttentionModel import AttentionPointsModel
 from ColorizationModel import ColorizationModel
@@ -16,7 +17,7 @@ class TrainingPipeline:
     Elle va entrainer les modèles d'attention et de colorisation séparément.
     """
 
-    def __init__(self, attention_model: AttentionPointsModel, primary_model: ColorizationModel, secondary_model: ColorizationModel, device=None):
+    def __init__(self, attention_model: AttentionPointsModel, primary_model: ColorizationModel, secondary_model: ColorizationModel, device=config.device):
         """
         Initialise le pipeline d'entraînement avec les modèles fournis.
 
@@ -29,14 +30,14 @@ class TrainingPipeline:
         self.attention_model = attention_model
         self.primary_model = primary_model
         self.secondary_model = secondary_model
-        self.device = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = device
 
         # Envoyer les modèles sur le device
         self.attention_model.to(self.device)
         self.primary_model.to(self.device)
         self.secondary_model.to(self.device)
 
-    def train_attention_model(self, dataloader: DataLoader, epochs: int, lr: float):
+    def train_attention_model(self, dataloader: DataLoader, epochs: int = config.num_epochs, lr: float = config.learning_rate):
         """
         Entraîne le modèle d'attention.
 
@@ -79,7 +80,7 @@ class TrainingPipeline:
             print(f"Époque {epoch+1}/{epochs}, Perte moyenne: {avg_loss:.4f}")
 
         # Sauvegarder le modèle après l'entraînement
-        self.attention_model.save_model('models/attention_model.pth')
+        self.attention_model.save_model(config.attention_model_path)
 
     def generate_attention_masks(self, dataset_loader: DatasetLoader):
         """
@@ -89,7 +90,7 @@ class TrainingPipeline:
         - dataset_loader (DatasetLoader): Loader pour le dataset complet.
         """
         self.attention_model.eval()
-        os.makedirs('dataset/attention_maps', exist_ok=True)
+        os.makedirs(config.attention_maps_dir, exist_ok=True)
 
         with torch.no_grad():
             for idx in tqdm(range(len(dataset_loader)), desc="Génération des masques d'attention"):
@@ -105,7 +106,7 @@ class TrainingPipeline:
                 attention_map = attention_map.squeeze(0).cpu()
 
                 # Sauvegarder le masque d'attention
-                torch.save(attention_map, f'dataset/attention_maps/{image_id}_attention_map.pt')
+                torch.save(attention_map, f'{config.attention_maps_dir}/{image_id}_attention_map.pt')
 
     def extract_and_save_patches(self, dataset_loader: DatasetLoader, patch_extractor: PatchExtractor, save_dir: str):
         """
@@ -127,7 +128,7 @@ class TrainingPipeline:
             image_id = os.path.splitext(sample['metadata']['source_path'])[0]
 
             # Charger le masque d'attention
-            attention_map_path = f'dataset/attention_maps/{image_id}_attention_map.pt'
+            attention_map_path = f'{config.attention_maps_dir}/{image_id}_attention_map.pt'
             if not os.path.exists(attention_map_path):
                 continue
             attention_map = torch.load(attention_map_path)
