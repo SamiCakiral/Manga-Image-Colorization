@@ -24,11 +24,16 @@ class DatasetLoader(Dataset):
         - dataset_type (str): 'training' ou 'inference' pour choisir le dataset
         - split (str): 'train' ou 'val' pour choisir l'ensemble de données
         """
-        base_dir = os.path.join('/content/dataset', dataset_type)
-        self.bw_dir = os.path.join(base_dir, 'source/bw')
-        self.color_dir = os.path.join(base_dir, 'source/color')
-        self.metadata_dir = os.path.join(base_dir, 'metadata')
+        # Utiliser les chemins de la configuration
+        dataset_base = os.path.join(config['paths']['dataset_dir'], dataset_type)
+        self.bw_dir = os.path.join(dataset_base, 'source/bw')
+        self.color_dir = os.path.join(dataset_base, 'source/color')
+        self.metadata_dir = os.path.join(dataset_base, 'metadata')
         self.transform = transform
+
+        # Créer les répertoires s'ils n'existent pas
+        for directory in [self.bw_dir, self.color_dir, self.metadata_dir]:
+            os.makedirs(directory, exist_ok=True)
 
         self.image_ids = [os.path.splitext(f)[0] for f in os.listdir(self.bw_dir) if f.endswith('.png')]
 

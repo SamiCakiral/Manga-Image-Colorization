@@ -2,16 +2,16 @@
 name: "default"
 description: "Configuration par défaut"
 
-# Chemins des données
+# Chemins des données (seront ajustés automatiquement selon l'environnement)
 paths:
-  dataset_dir: "/content/dataset/"
-  bw_dir: "${dataset_dir}/source/bw"
-  color_dir: "${dataset_dir}/source/color"
-  metadata_dir: "${dataset_dir}/metadata"
-  attention_maps_dir: "${dataset_dir}/attention_maps"
-  patches_dir: "${dataset_dir}/patches"
-  models_dir: "models"
-  best_attention_model_path: "models/best_attention_model.pth"
+  dataset_dir: "${environment.data_root}/dataset"  # sera résolu automatiquement
+  bw_dir: "${paths.dataset_dir}/source/bw"
+  color_dir: "${paths.dataset_dir}/source/color"
+  metadata_dir: "${paths.dataset_dir}/metadata"
+  attention_maps_dir: "${paths.dataset_dir}/attention_maps"
+  patches_dir: "${paths.dataset_dir}/patches"
+  models_dir: "${environment.data_root}/models"
+  best_attention_model_path: "${paths.models_dir}/best_attention_model.pth"
 
 # Configuration du modèle
 model:

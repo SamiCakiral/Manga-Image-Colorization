@@ -30,8 +30,8 @@ class DatasetRetriever:
         self.gdrive_url = dataset_config['gdrive_url']
         self.target_images = dataset_config['target_images']
         
-        # Ajuster le chemin selon le type de dataset
-        self.dataset_dir = os.path.join('/content/dataset', dataset_type)
+        # Utiliser les chemins de la configuration
+        self.dataset_dir = os.path.join(config['paths']['dataset_dir'], dataset_type)
         
         # Chemins et structures de répertoires
         self.master_zip_path = os.path.join(self.dataset_dir, 'master.zip')

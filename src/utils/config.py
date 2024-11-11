@@ -5,9 +5,86 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 import torch
 import re
+import platform
+import psutil
+import subprocess
+import sys
 
 class ConfigurationError(Exception):
     pass
+
+class EnvironmentDetector:
+    """Détecte l'environnement d'exécution et le matériel disponible."""
+    
+    @staticmethod
+    def is_colab() -> bool:
+        """Vérifie si le code s'exécute dans Google Colab."""
+        try:
+            import google.colab
+            return True
+        except ImportError:
+            return False
+
+    @staticmethod
+    def get_gpu_info() -> Dict[str, Any]:
+        """Récupère les informations sur le GPU."""
+        gpu_info = {
+            'available': torch.cuda.is_available(),
+            'count': torch.cuda.device_count() if torch.cuda.is_available() else 0,
+            'name': None,
+            'memory': None
+        }
+        
+        if gpu_info['available']:
+            gpu_info['name'] = torch.cuda.get_device_name(0)
+            try:
+                gpu_info['memory'] = torch.cuda.get_device_properties(0).total_memory
+            except:
+                pass
+        
+        return gpu_info
+
+    @staticmethod
+    def get_tpu_info() -> Dict[str, Any]:
+        """Vérifie la disponibilité des TPU."""
+        tpu_available = False
+        tpu_count = 0
+        
+        try:
+            import torch_xla
+            import torch_xla.core.xla_model as xm
+            tpu_available = True
+            tpu_count = xm.xrt_world_size()
+        except ImportError:
+            pass
+        
+        return {
+            'available': tpu_available,
+            'count': tpu_count
+        }
+
+    @staticmethod
+    def get_cpu_info() -> Dict[str, Any]:
+        """Récupère les informations sur le CPU."""
+        return {
+            'count': psutil.cpu_count(),
+            'physical_count': psutil.cpu_count(logical=False),
+            'name': platform.processor(),
+            'memory': psutil.virtual_memory().total
+        }
+
+    @staticmethod
+    def get_environment_info() -> Dict[str, Any]:
+        """Récupère toutes les informations sur l'environnement."""
+        return {
+            'platform': platform.system(),
+            'python_version': sys.version.split()[0],
+            'torch_version': torch.__version__,
+            'is_colab': EnvironmentDetector.is_colab(),
+            'gpu': EnvironmentDetector.get_gpu_info(),
+            'tpu': EnvironmentDetector.get_tpu_info(),
+            'cpu': EnvironmentDetector.get_cpu_info()
+        }
 
 class Config:
     def __init__(self, config_name: str = "default"):
@@ -17,6 +94,10 @@ class Config:
         Args:
             config_name: Nom de la configuration à charger (sans extension .yaml)
         """
+        # Détection de l'environnement
+        self.env_info = EnvironmentDetector.get_environment_info()
+        
+        # Configuration des chemins
         self.root_dir = Path(__file__).parent.parent.parent.absolute()
         self.config_dir = self.root_dir / "configs"
         
@@ -25,8 +106,60 @@ class Config:
         
         self.config_name = config_name
         self.config = self._load_config(config_name)
+        
+        # Ajout des informations d'environnement à la configuration
+        self.config['environment'] = self.env_info
+        
+        # Détermination automatique du device optimal
+        self.config['training']['device'] = self._determine_optimal_device()
+        
         self._process_config()
         
+    def _determine_optimal_device(self) -> torch.device:
+        """Détermine le meilleur device disponible pour l'entraînement."""
+        if self.env_info['tpu']['available']:
+            import torch_xla.core.xla_model as xm
+            return xm.xla_device()
+        elif self.env_info['gpu']['available']:
+            return torch.device('cuda')
+        return torch.device('cpu')
+
+    def print_environment_info(self):
+        """Affiche les informations sur l'environnement d'exécution."""
+        env = self.env_info
+        print("\n🔍 Environnement détecté:")
+        print(f"📍 Plateforme: {env['platform']}")
+        print(f"🐍 Python: {env['python_version']}")
+        print(f"🔥 PyTorch: {env['torch_version']}")
+        print(f"☁️  Google Colab: {'Oui' if env['is_colab'] else 'Non'}")
+        
+        print("\n💻 Ressources disponibles:")
+        
+        # Info CPU
+        cpu = env['cpu']
+        print(f"CPU: {cpu['name']}")
+        print(f"  - Cœurs: {cpu['physical_count']} physiques, {cpu['count']} logiques")
+        print(f"  - RAM: {cpu['memory'] / (1024**3):.1f} GB")
+        
+        # Info GPU
+        gpu = env['gpu']
+        if gpu['available']:
+            print(f"GPU: {gpu['name']}")
+            print(f"  - Nombre: {gpu['count']}")
+            if gpu['memory']:
+                print(f"  - VRAM: {gpu['memory'] / (1024**3):.1f} GB")
+        else:
+            print("GPU: Non disponible")
+        
+        # Info TPU
+        tpu = env['tpu']
+        if tpu['available']:
+            print(f"TPU: Disponible ({tpu['count']} cœurs)")
+        else:
+            print("TPU: Non disponible")
+        
+        print(f"\n🎯 Device sélectionné: {self.config['training']['device']}")
+
     def _load_config(self, config_name: str) -> Dict[str, Any]:
         """Charge un fichier de configuration et ses dépendances."""
         # Chercher d'abord dans experiment_configs
@@ -63,13 +196,18 @@ class Config:
     
     def _process_config(self):
         """Traite la configuration après le chargement."""
+        # Déterminer le répertoire racine des données selon l'environnement
+        if self.env_info['is_colab']:
+            data_root = '/content'
+        else:
+            # Utiliser un répertoire dans le projet pour l'environnement local
+            data_root = str(self.root_dir / 'data')
+        
+        # Ajouter l'information à l'environnement
+        self.env_info['data_root'] = data_root
+        
         # Résoudre les variables
         self.config = self._resolve_variables(self.config)
-        
-        # Configurer le device
-        self.config['training']['device'] = (
-            torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        )
         
         # Créer les répertoires nécessaires
         self._create_directories()
@@ -128,3 +266,4 @@ class Config:
 
 # Instance globale de la configuration
 config = Config()
+config.print_environment_info()
