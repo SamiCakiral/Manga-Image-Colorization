@@ -71,3 +71,174 @@ La technique propose une nouvelle approche de colorisation de manga utilisant un
   - Précision des couleurs
   - Cohérence des transitions
   - Qualité globale
+
+# Structure et Documentation du Projet de Colorisation
+
+## 1. Vue d'ensemble de la Structure
+
+```
+/dataset/
+    /source/
+        /bw/             # Images noir et blanc
+        /color/          # Images colorées originales
+    /metadata/           # Métadonnées pour chaque image
+    /attention_maps/     # Sera généré durant l'entraînement
+        /patches/
+            /important/  # Zones prioritaires
+            /background/ # Zones de remplissage
+    - dataset_info.json  # Informations globales du dataset
+
+/models/
+    /attention/          # Modèle d'attention
+    /primary/           # Modèle de colorisation principale
+    /secondary/         # Modèle de colorisation secondaire
+    /checkpoints/       # Points de sauvegarde
+
+/training/
+    /logs/              # Logs d'entraînement
+    /visualization/     # Visualisations générées
+    /metrics/           # Métriques d'évaluation
+```
+
+## 2. Pourquoi Cette Structure ?
+
+### 2.1 Séparation Source/Attention
+- **Avantage Mémoire** : Permet de charger sélectivement les données nécessaires
+- **Traçabilité** : Séparation claire entre données originales et générées
+- **Flexibilité** : Possibilité de régénérer les maps d'attention sans toucher aux sources
+
+### 2.2 Système de Métadonnées
+- Stockage des informations par image :
+  ```json
+  {
+    "original_size": [1200, 1800],
+    "chapter": "chapter_123",
+    "attention_regions": [
+      {"x": 100, "y": 200, "w": 300, "h": 400, "importance": 0.9}
+    ]
+  }
+  ```
+- Permet le tracking des transformations
+- Facilite le debugging et l'analyse
+
+### 2.3 Organisation des Modèles
+- Séparation claire des responsabilités
+- Facilite l'entraînement indépendant
+- Permet le versioning des différents composants
+
+## 3. Utilisation dans le Pipeline
+
+### 3.1 Phase de Préparation
+```python
+# Exemple d'utilisation
+dataset = DatasetLoader('/dataset/source')
+attention_model = AttentionModel()
+
+# Génération des maps d'attention
+for image in dataset:
+    attention_map = attention_model.predict(image)
+    save_attention_patches(attention_map)
+```
+
+### 3.2 Phase d'Entraînement
+- Utilisation du DataLoader personnalisé
+- Chargement dynamique des patches
+- Synchronisation des modèles primaire et secondaire
+
+### 3.3 Inférence
+```python
+def colorize_image(bw_image):
+    # 1. Génération de la map d'attention
+    attention_map = attention_model.predict(bw_image)
+    
+    # 2. Extraction des zones importantes
+    important_regions = extract_regions(attention_map)
+    
+    # 3. Colorisation parallèle
+    primary_colors = primary_model.predict(important_regions)
+    secondary_colors = secondary_model.predict(remaining_regions)
+    
+    # 4. Fusion
+    return merge_colorizations(primary_colors, secondary_colors)
+```
+
+## 4. Avantages de cette Approche
+
+### 4.1 Pour le Développement
+- Organisation claire et modulaire
+- Facilité de debugging
+- Support du travail collaboratif
+- Versioning efficace
+
+### 4.2 Pour l'Entraînement
+- Gestion optimisée de la mémoire
+- Chargement efficace des données
+- Flexibilité dans l'expérimentation
+- Tracking précis des résultats
+
+### 4.3 Pour la Production
+- Pipeline clair et documenté
+- Facilité de déploiement
+- Maintenance simplifiée
+- Évolutivité
+
+## 5. Utilisation Pratique
+
+### 5.1 Création du Dataset
+```bash
+# Création initiale
+python create_dataset.py --source_dir /path/to/manga --target_dir /dataset
+
+# Génération des maps d'attention
+python generate_attention.py --dataset_dir /dataset
+```
+
+### 5.2 Entraînement
+```bash
+# Entraînement du modèle d'attention
+python train_attention.py --dataset_dir /dataset
+
+# Entraînement des modèles de colorisation
+python train_colorization.py --mode primary
+python train_colorization.py --mode secondary
+```
+
+### 5.3 Inférence
+```bash
+python colorize.py --input image.png --output colored.png
+```
+
+## 6. Extensions Futures
+
+### 6.1 Ajouts Possibles
+- Système de cache pour les patches fréquemment utilisés
+- Pipeline de validation des données
+- Métriques d'évaluation automatisées
+- Interface de visualisation
+
+### 6.2 Optimisations Envisagées
+- Compression intelligente des données
+- Streaming de données pour les grands datasets
+- Distribution de l'entraînement
+- Pipeline d'augmentation de données
+
+## 7. Bonnes Pratiques
+
+### 7.1 Gestion des Données
+- Toujours garder une copie des données originales
+- Versionner les métadonnées
+- Documenter les transformations
+
+### 7.2 Entraînement
+- Sauvegarder régulièrement les checkpoints
+- Tracker les métriques importantes
+- Valider régulièrement les résultats
+
+### 7.3 Maintenance
+- Nettoyer régulièrement les données temporaires
+- Maintenir la documentation à jour
+- Vérifier la cohérence des métadonnées
+
+## 8. Conclusion
+
+Cette structure a été conçue pour supporter efficacement notre approche de colorisation double-flux avec attention, tout en restant flexible et maintenable. Elle permet une gestion efficace des ressources et une expérimentation aisée, tout en gardant une trace claire de toutes les transformations et résultats.
