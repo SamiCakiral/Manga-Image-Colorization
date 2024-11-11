@@ -11,6 +11,7 @@ paths:
   attention_maps_dir: "${dataset_dir}/attention_maps"
   patches_dir: "${dataset_dir}/patches"
   models_dir: "models"
+  best_attention_model_path: "models/best_attention_model.pth"
 
 # Configuration du modèle
 model:
@@ -51,3 +52,10 @@ preprocessing:
   target_size: [1024, 1024]
   normalize: true
   augmentation: true
+
+# Configuration des données de validation
+data:
+  bw_dir: "/content/dataset/source/bw"
+  color_dir: "/content/dataset/source/color"
+  metadata_dir: "/content/dataset/metadata"
+  validation_split: 0.2  # 20% des données pour la validation
