@@ -2,7 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
-from utils.config import config
+from torchvision.transforms import functional as TF
+from ..utils.config import config
+from .losses import AttentionLoss, diversity_loss
+import numpy as np
 
 class AttentionPointsModel(nn.Module):
     """Cette classe est un modèle d'attention qui prédit des points clés pour guider le découpage intelligent. 
@@ -10,7 +13,7 @@ class AttentionPointsModel(nn.Module):
     Et elle utilise une tête d'attention pour prédire les points d'attention Avec une gaussienne autour du point.
     ViT-B/16 est un modèle de vision transformer pré-entraîné sur ImageNet qui est utilisé pour extraire des features.››
     """
-    def __init__(self, max_points=config.max_attention_points):
+    def __init__(self, max_points=32):
         """
         Initialise le modèle d'attention qui prédit des points clés.
         
@@ -20,17 +23,56 @@ class AttentionPointsModel(nn.Module):
         super(AttentionPointsModel, self).__init__()
         
         # Vision Transformer modifié pour prédire des points
-        self.vit = models.vit_b_16(weights='IMAGENET1K_V1' if config.vit_pretrained else None)
+        self.vit = models.vit_b_16(
+            weights='IMAGENET1K_V1' if config.config['model']['vit']['pretrained'] else None
+        )
         
-        # Remplacer la tête de classification par notre tête d'attention
-        self.attention_head = nn.Sequential(
-            nn.Linear(config.vit_feature_size, config.attention_head_hidden),
+        # Calculer la dimension d'entrée pour spatial_features
+        vit_features = self.vit.hidden_dim  # 768 pour ViT-B/16
+        edge_features = (224 // 16) * (224 // 16)  # Features des bords après conv
+        total_features = vit_features + edge_features
+        
+        # Ajout de couches intermédiaires pour mieux capturer les caractéristiques spatiales
+        self.spatial_features = nn.Sequential(
+            nn.Linear(total_features, 512),
             nn.ReLU(),
-            nn.Linear(config.attention_head_hidden, max_points * 3)  # (x, y, importance_score) pour chaque point
+            nn.Dropout(0.1),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Dropout(0.1)
+        )
+        
+        # Tête d'attention avec sortie plus diversifiée
+        self.attention_head = nn.Sequential(
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(128, max_points * 3)
         )
         
         self.max_points = max_points
         
+        # Initialisation des poids pour éviter la convergence vers le centre
+        self._init_weights()
+        
+    def _init_weights(self):
+        """Initialise les poids pour favoriser une distribution spatiale plus diverse"""
+        for m in self.spatial_features.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+                    
+        # Initialisation spéciale pour la dernière couche
+        last_layer = self.attention_head[-1]
+        nn.init.uniform_(last_layer.weight, -0.1, 0.1)
+        if last_layer.bias is not None:
+            # Initialiser les biais pour avoir des points répartis sur toute l'image
+            points_bias = torch.linspace(-2, 2, self.max_points * 2)
+            scores_bias = torch.zeros(self.max_points)
+            nn.init.constant_(last_layer.bias[:self.max_points * 2], 0)
+            nn.init.constant_(last_layer.bias[self.max_points * 2:], 0)
+    
     def forward(self, x):
         """
         Prédit les points d'attention pour l'image.
@@ -43,82 +85,132 @@ class AttentionPointsModel(nn.Module):
         if x.size(1) == 1:
             x = x.repeat(1, 3, 1, 1)
             
-        # Obtenir les features du ViT
-        features = self.vit.forward_features(x)
+        # Détecter les bords des cases avec Canny
+        edges = self.detect_panel_edges(x)
         
+        # Redimensionner les edges pour correspondre à la taille des features ViT
+        edges = F.adaptive_avg_pool2d(edges, (14, 14))  # 224/16 = 14
+        edges = edges.view(edges.size(0), -1)  # Aplatir
+        
+        # Obtenir les features du ViT
+        x = self.vit.conv_proj(x)
+        batch_size, embed_dim, _, _ = x.shape
+        x = x.flatten(2).transpose(1, 2)  # BCHW -> BNC
+        
+        # Ajouter le token [CLS]
+        cls_token = self.vit.class_token.expand(batch_size, -1, -1)
+        x = torch.cat([cls_token, x], dim=1)
+        
+        # Ajouter l'embedding de position
+        x = x + self.vit.encoder.pos_embedding
+        
+        # Passer dans l'encodeur
+        for block in self.vit.encoder.layers:
+            x = block(x)
+        
+        # Prendre le token [CLS]
+        features = x[:, 0]
+        
+        # Concaténer avec les features des bords
+        features = torch.cat([features, edges], dim=1)
+        
+        # Extraction des caractéristiques spatiales
+        features = self.spatial_features(features)
+        
+        # Prédiction avec bruit pour plus de diversité
+        if self.training:
+            features = features + torch.randn_like(features) * 0.1
+            
         # Prédire les points et scores
-        output = self.attention_head(features[:, 0])  # Utiliser le token [CLS]
+        output = self.attention_head(features)
         output = output.view(-1, self.max_points, 3)
         
         # Séparer coordonnées et scores
-        points = output[:, :, :2]  # x,y coordonnées
-        scores = output[:, :, 2]   # scores d'importance
+        points = output[:, :, :2]
+        scores = output[:, :, 2]
         
-        # Normaliser les coordonnées entre 0 et 1
-        points = torch.sigmoid(points)
+        # Forcer une distribution plus uniforme des points
+        points = self.distribute_points(points)
+        
         # Normaliser les scores
         scores = torch.sigmoid(scores)
         
+        # Filtrer les points selon leur score
+        points, scores = self.filter_attention_points(
+            points, 
+            scores,
+            min_points=5,  # Au moins 5 points
+            min_score_threshold=0.3,  # Score minimum de 0.3
+            max_points=15  # Maximum 15 points
+        )
+        
         return points, scores
         
-    def get_attention_patches(self, image, points, scores, patch_size=config.patch_size):
+    def get_attention_patches(self, images, points, scores, patch_size=32):
         """
-        Génère des patches de 256x256 autour des points d'attention.
+        Extrait les patches autour des points d'attention.
         
-        Arguments:
-        - image: tensor de forme (B, C, H, W)
-        - points: tensor de forme (B, N, 2) avec coordonnées normalisées
-        - scores: tensor de forme (B, N) avec scores d'importance
-        - patch_size: taille des patches à extraire
-        
+        Args:
+            images (torch.Tensor): Images d'entrée [B, C, H, W]
+            points (torch.Tensor): Points d'attention [B, N, 2]
+            scores (torch.Tensor): Scores d'importance [B, N]
+            patch_size (int): Taille des patches à extraire
+            
         Returns:
-        - patches: liste des patches extraits
-        - patch_coords: coordonnées des patches dans l'image originale
+            patches (list): Liste de patches pour chaque image
+            coords (list): Liste des coordonnées des patches
         """
-        B, C, H, W = image.shape
-        patches = []
-        patch_coords = []
-        radius = patch_size // 2
+        B = images.size(0)
+        H, W = images.shape[-2:]
+        N = points.size(1)  # Utiliser le nombre réel de points
         
         # Convertir les coordonnées normalisées en pixels
         points = points.clone()
         points[:, :, 0] *= W
         points[:, :, 1] *= H
         
-        # Pour chaque image dans le batch
+        # Trier les points par score d'importance
+        scores = scores[:, :N]  # S'assurer que scores a la même taille que points
+        
+        patches = []
+        coords = []
+        
         for b in range(B):
-            img_patches = []
-            img_coords = []
-            
-            # Trier les points par score d'importance
-            _, indices = scores[b].sort(descending=True)
+            # Trier les points par score
+            indices = torch.argsort(scores[b], descending=True)
             sorted_points = points[b][indices]
+            
+            image_patches = []
+            patch_coords = []
             
             for point in sorted_points:
                 x, y = point
                 
                 # Calculer les coordonnées du patch
-                left = max(0, int(x - radius))
-                top = max(0, int(y - radius))
-                right = min(W, left + patch_size)
-                bottom = min(H, top + patch_size)
+                x1 = max(0, int(x - patch_size // 2))
+                x2 = min(W, int(x + patch_size // 2))
+                y1 = max(0, int(y - patch_size // 2))
+                y2 = min(H, int(y + patch_size // 2))
                 
                 # Extraire le patch
-                patch = image[b:b+1, :, top:bottom, left:right]
+                patch = images[b, :, y1:y2, x1:x2]
                 
-                # Padding si nécessaire
-                if patch.shape[2:] != (patch_size, patch_size):
-                    pad_h = patch_size - patch.shape[2]
-                    pad_w = patch_size - patch.shape[3]
-                    patch = F.pad(patch, (0, pad_w, 0, pad_h))
+                # Redimensionner si nécessaire
+                if patch.size(-1) != patch_size or patch.size(-2) != patch_size:
+                    patch = F.interpolate(
+                        patch.unsqueeze(0),
+                        size=(patch_size, patch_size),
+                        mode='bilinear',
+                        align_corners=False
+                    ).squeeze(0)
                 
-                img_patches.append(patch)
-                img_coords.append((left, top, right, bottom))
+                image_patches.append(patch)
+                patch_coords.append((x1, y1, x2, y2))
             
-            patches.append(img_patches)
-            patch_coords.append(img_coords)
-            
-        return patches, patch_coords
+            patches.append(image_patches)
+            coords.append(patch_coords)
+        
+        return patches, coords
     
     def compute_complexity_maps(self, image):
         """
@@ -230,7 +322,12 @@ class AttentionPointsModel(nn.Module):
     
     def train_step(self, batch, optimizer, criterion):
         """
-        Une étape d'entraînement.
+        Une étape d'entraînement qui utilise toutes les pertes définies.
+        
+        Args:
+            batch: Dictionnaire contenant les données d'entrée
+            optimizer: Optimiseur PyTorch
+            criterion: Instance de AttentionLoss
         """
         optimizer.zero_grad()
         
@@ -246,13 +343,45 @@ class AttentionPointsModel(nn.Module):
         # Convertir les points en carte d'attention
         pred_attention = self.points_to_attention_map(points, scores, images.shape[2:])
         
-        # Calculer la perte
-        loss = criterion(pred_attention, complexity_maps)
+        # Calculer les différentes composantes de la perte
+        # 1. Perte principale (définie dans AttentionLoss)
+        main_loss = criterion(points, scores, complexity_maps)
         
-        loss.backward()
+        # 2. Perte de diversité spatiale (importée de losses.py)
+        div_loss = diversity_loss(points, scores)
+        
+        # 3. Perte de couverture de l'image
+        coverage_loss = torch.mean((points - 0.5).pow(2).sum(dim=-1))
+        
+        # 4. Perte de concentration des scores
+        score_concentration_loss = -torch.mean(
+            scores * torch.log(scores + 1e-8) + 
+            (1 - scores) * torch.log(1 - scores + 1e-8)
+        )
+        
+        # Perte totale avec pondération depuis la config
+        total_loss = (
+            main_loss +
+            config.config['model']['attention']['loss_weights']['diversity'] * div_loss +
+            config.config['model']['attention']['loss_weights']['coverage'] * coverage_loss +
+            config.config['model']['attention']['loss_weights']['score_concentration'] * score_concentration_loss
+        )
+        
+        # Ajouter une perte de complexité pour guider l'attention vers les zones complexes
+        complexity_loss = F.mse_loss(pred_attention, complexity_maps)
+        total_loss += config.config['model']['attention']['loss_weights'].get('complexity', 0.5) * complexity_loss
+        
+        # Backpropagation
+        total_loss.backward()
         optimizer.step()
         
-        return loss.item()
+        return {
+            'total_loss': total_loss.item(),
+            'diversity_loss': div_loss.item(),
+            'coverage_loss': coverage_loss.item(),
+            'score_concentration_loss': score_concentration_loss.item(),
+            'complexity_loss': complexity_loss.item()
+        }
     
     @staticmethod
     def points_to_attention_map(points, scores, size):
@@ -288,3 +417,118 @@ class AttentionPointsModel(nn.Module):
         attention_maps = attention_maps / attention_maps.max()
         
         return attention_maps
+
+    def detect_panel_edges(self, x):
+        """Détecte les bords des cases de manga"""
+        # Convertir en grayscale
+        gray = 0.299 * x[:,0] + 0.587 * x[:,1] + 0.114 * x[:,2]
+        
+        # Appliquer Canny
+        sigma = 1.0
+        kernel_size = int(2 * np.ceil(3 * sigma) + 1)
+        
+        # Gaussian blur avec torchvision
+        gaussian = TF.gaussian_blur(
+            gray.unsqueeze(1), 
+            kernel_size=kernel_size,
+            sigma=sigma
+        )
+        
+        # Sobel pour trouver les gradients
+        sobel_x = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], device=x.device).float()
+        sobel_y = torch.tensor([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], device=x.device).float()
+        
+        grad_x = F.conv2d(gaussian, sobel_x.view(1, 1, 3, 3), padding=1)
+        grad_y = F.conv2d(gaussian, sobel_y.view(1, 1, 3, 3), padding=1)
+        
+        # Magnitude et direction
+        magnitude = torch.sqrt(grad_x**2 + grad_y**2)
+        
+        return magnitude
+
+    def distribute_points(self, points):
+        """Force une meilleure distribution des points"""
+        batch_size = points.size(0)
+        num_points = min(25, points.size(1))  # Limiter à 25 points
+        
+        # Grille régulière pour initialisation
+        grid_size = int(np.sqrt(num_points))
+        x = torch.linspace(0.1, 0.9, grid_size)
+        y = torch.linspace(0.1, 0.9, grid_size)
+        grid_x, grid_y = torch.meshgrid(x, y, indexing='xy')
+        grid_points = torch.stack([grid_x.flatten(), grid_y.flatten()], dim=1)
+        
+        # S'assurer que nous avons le bon nombre de points
+        grid_points = grid_points[:num_points]
+        
+        # Répéter pour chaque batch
+        grid_points = grid_points.unsqueeze(0).repeat(batch_size, 1, 1)
+        
+        # Ajouter du bruit aux points de la grille
+        noise = torch.randn_like(grid_points) * 0.05
+        points = grid_points + noise
+        
+        # Clipper entre 0 et 1
+        points = torch.clamp(points, 0, 1)
+        
+        return points
+
+    def filter_attention_points(self, points, scores, min_points=5, min_score_threshold=0.3, max_points=15):
+        """
+        Filtre les points d'attention selon leur score et les contraintes.
+        
+        Args:
+            points (torch.Tensor): Points d'attention [B, N, 2]
+            scores (torch.Tensor): Scores d'importance [B, N]
+            min_points (int): Nombre minimum de points à garder
+            min_score_threshold (float): Seuil minimum pour le score
+            max_points (int): Nombre maximum de points à garder
+        """
+        batch_size = points.size(0)
+        num_points = points.size(1)  # Nombre de points actuels
+        
+        # Debug
+        print(f"Input shapes - Points: {points.shape}, Scores: {scores.shape}")
+        
+        filtered_points = []
+        filtered_scores = []
+        
+        for b in range(batch_size):
+            # Trier les points par score
+            current_scores = scores[b, :num_points]  # Prendre seulement les scores valides
+            current_points = points[b, :num_points]  # Prendre seulement les points valides
+            
+            sorted_indices = torch.argsort(current_scores, descending=True)
+            sorted_scores = current_scores[sorted_indices]
+            sorted_points = current_points[sorted_indices]
+            
+            # Appliquer le seuil de score
+            mask = sorted_scores >= min_score_threshold
+            
+            # S'assurer d'avoir au moins min_points
+            if mask.sum() < min_points:
+                mask[:min_points] = True
+            
+            # Limiter au nombre maximum de points
+            max_idx = min(max_points, len(mask))
+            mask = mask[:max_idx]
+            
+            filtered_points.append(sorted_points[mask])
+            filtered_scores.append(sorted_scores[mask])
+            
+            # Debug
+            print(f"Batch {b} - Points filtrés: {filtered_points[-1].shape}, Scores filtrés: {filtered_scores[-1].shape}")
+        
+        # Padding pour avoir des tenseurs de taille uniforme
+        max_filtered = max(len(p) for p in filtered_points)
+        max_filtered = min(max_filtered, max_points)  # Ne pas dépasser max_points
+        
+        padded_points = torch.zeros(batch_size, max_filtered, 2, device=points.device)
+        padded_scores = torch.zeros(batch_size, max_filtered, device=scores.device)
+        
+        for b in range(batch_size):
+            n = min(len(filtered_points[b]), max_filtered)
+            padded_points[b, :n] = filtered_points[b][:n]
+            padded_scores[b, :n] = filtered_scores[b][:n]
+        
+        return padded_points, padded_scores

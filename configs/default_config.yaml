@@ -20,9 +20,15 @@ model:
     pretrained: true
     feature_size: 768
   attention:
-    max_points: 32
+    min_points: 5
+    min_score_threshold: 0.3
+    max_points: 15
     head_hidden: 512
     gaussian_sigma: 42.67  # 128/3
+    loss_weights:
+      diversity: 1.0
+      coverage: 0.1
+      score_concentration: 0.5
   patch:
     size: 256
     overlap: 32

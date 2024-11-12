@@ -272,6 +272,26 @@ class Config:
         with open(path, 'w', encoding='utf-8') as f:
             yaml.dump(self.config, f, default_flow_style=False, allow_unicode=True)
 
-# Instance globale de la configuration
-config = Config()
-config.print_environment_info()
+# Instance globale de la configuration avec pattern Singleton
+class ConfigSingleton:
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = Config()
+        return cls._instance
+    
+    def __init__(self):
+        # S'assurer que print_environment_info() n'est appelé qu'une seule fois
+        print("Initialisation de ConfigSingleton")
+        if not ConfigSingleton._initialized:
+            self.print_environment_info = self._instance.print_environment_info
+            self.print_environment_info()
+            ConfigSingleton._initialized = True
+        
+    def __getattr__(self, name):
+        return getattr(self._instance, name)
+
+# Créer l'instance unique qui sera utilisée partout
+config = ConfigSingleton()
