@@ -19,6 +19,9 @@ model:
     model_name: "vit_b_16"
     pretrained: true
     feature_size: 768
+  deeplab:  # Ajout de la configuration DeepLabV3
+    pretrained: true
+    backbone: "resnet50"
   attention:
     min_points: 5
     min_score_threshold: 0.3
@@ -27,8 +30,10 @@ model:
     gaussian_sigma: 42.67  # 128/3
     loss_weights:
       diversity: 1.0
-      coverage: 0.1
-      score_concentration: 0.5
+      coverage: 0.5
+      grid: 1.0
+      score_concentration: 0.3
+      complexity: 0.5
   patch:
     size: 256
     overlap: 32

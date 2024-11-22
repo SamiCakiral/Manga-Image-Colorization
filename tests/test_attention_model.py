@@ -30,12 +30,15 @@ def visualize_attention_map(image, points, scores, save_path=None):
     
     plt.figure(figsize=(12, 6))
     
+    # Redimensionner l'image à 224x224 pour correspondre au traitement
+    image_resized = F.interpolate(image.unsqueeze(0), size=(224, 224), mode='bilinear').squeeze(0)
+    
     # Image originale avec points
     plt.subplot(1, 2, 1)
-    plt.imshow(image.squeeze(), cmap='gray')
+    plt.imshow(image_resized.squeeze().cpu(), cmap='gray')
     
     # Convertir les coordonnées normalisées en pixels
-    H, W = image.shape[-2:]
+    H, W = 224, 224  # Utiliser la taille fixe de 224x224
     points_pixels = points.clone().detach().cpu().numpy()
     points_pixels[:, 0] *= W
     points_pixels[:, 1] *= H
@@ -63,7 +66,7 @@ def visualize_attention_map(image, points, scores, save_path=None):
     attention_map = AttentionPointsModel.points_to_attention_map(
         points.unsqueeze(0), 
         scores.unsqueeze(0), 
-        (H, W)
+        (H, W)  # Utiliser 224x224
     )
     plt.imshow(attention_map[0, 0].cpu(), cmap='hot')
     plt.title("Carte d'attention")

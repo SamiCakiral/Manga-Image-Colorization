@@ -81,6 +81,12 @@ class AttentionPointsModel(nn.Module):
         - points: tensor de forme (batch_size, max_points, 2) pour les coordonnées x,y
         - scores: tensor de forme (batch_size, max_points) pour les scores d'importance
         """
+        # Détecter et recadrer les marges blanches
+        x, crop_coords = self.remove_white_margins(x)
+        
+        # Redimensionner l'image à la taille attendue par le ViT (224x224)
+        x = F.interpolate(x, size=(224, 224), mode='bilinear', align_corners=False)
+        
         # Adapter l'image en entrée
         if x.size(1) == 1:
             x = x.repeat(1, 3, 1, 1)
@@ -143,6 +149,9 @@ class AttentionPointsModel(nn.Module):
             min_score_threshold=0.3,  # Score minimum de 0.3
             max_points=15  # Maximum 15 points
         )
+        
+        # Ajuster les coordonnées des points en fonction du recadrage
+        points = self.adjust_points_to_original(points, crop_coords)
         
         return points, scores
         
@@ -532,3 +541,124 @@ class AttentionPointsModel(nn.Module):
             padded_scores[b, :n] = filtered_scores[b][:n]
         
         return padded_points, padded_scores
+
+    def remove_white_margins(self, x):
+        """
+        Supprime les marges blanches autour de l'image.
+        
+        Returns:
+            - x_cropped: Image recadrée
+            - crop_coords: (top, left, bottom, right) coordonnées du recadrage
+        """
+        # Convertir en niveau de gris si ce n'est pas déjà fait
+        if x.size(1) == 3:
+            gray = 0.299 * x[:,0] + 0.587 * x[:,1] + 0.114 * x[:,2]
+        else:
+            gray = x[:,0]
+        
+        batch_size = x.size(0)
+        crops = []
+        crop_coords = []
+        
+        for b in range(batch_size):
+            # Trouver les pixels non-blancs (seuil à 0.95 pour tolérer le bruit)
+            mask = gray[b] < 0.95
+            
+            # Trouver les limites des pixels non-blancs
+            rows = torch.any(mask, dim=1)
+            cols = torch.any(mask, dim=0)
+            
+            top, bottom = torch.where(rows)[0][[0, -1]]
+            left, right = torch.where(cols)[0][[0, -1]]
+            
+            # Ajouter une marge de sécurité de 5 pixels
+            margin = 5
+            top = max(0, top - margin)
+            left = max(0, left - margin)
+            bottom = min(x.size(-2), bottom + margin)
+            right = min(x.size(-1), right + margin)
+            
+            # Recadrer l'image
+            x_cropped = x[b:b+1, :, top:bottom, left:right]
+            crops.append(x_cropped)
+            crop_coords.append((top, left, bottom, right))
+        
+        # Reconstruire le batch avec padding pour avoir des tailles uniformes
+        max_h = max(crop[0].size(-2) for crop in crops)
+        max_w = max(crop[0].size(-1) for crop in crops)
+        
+        padded_crops = []
+        for crop in crops:
+            pad_h = max_h - crop.size(-2)
+            pad_w = max_w - crop.size(-1)
+            padded = F.pad(crop, (0, pad_w, 0, pad_h), value=1.0)  # Padding blanc
+            padded_crops.append(padded)
+        
+        return torch.cat(padded_crops, dim=0), crop_coords
+
+    def adjust_points_to_original(self, points, crop_coords):
+        """
+        Ajuste les coordonnées des points pour correspondre à l'image d'origine.
+        """
+        batch_size = points.size(0)
+        adjusted_points = points.clone()
+        
+        for b in range(batch_size):
+            top, left, bottom, right = crop_coords[b]
+            
+            # Convertir les coordonnées normalisées en coordonnées absolues
+            h = bottom - top
+            w = right - left
+            
+            # Ajuster les coordonnées x
+            adjusted_points[b, :, 0] = adjusted_points[b, :, 0] * w + left
+            # Ajuster les coordonnées y
+            adjusted_points[b, :, 1] = adjusted_points[b, :, 1] * h + top
+            
+            # Renormaliser par rapport à la taille originale
+            adjusted_points[b, :, 0] /= self.vit.image_size
+            adjusted_points[b, :, 1] /= self.vit.image_size
+        
+        return adjusted_points
+
+    def find_local_maxima(self, attention_map, min_distance=10, threshold=0.5):
+        """
+        Trouve les maxima locaux dans la carte d'attention.
+        
+        Args:
+            attention_map: Carte d'attention (B, 1, H, W)
+            min_distance: Distance minimale entre deux maxima
+            threshold: Seuil minimal pour considérer un maximum
+            
+        Returns:
+            maxima_coords: Liste de coordonnées (x, y) des maxima locaux
+            maxima_values: Valeurs des maxima
+        """
+        batch_size = attention_map.size(0)
+        maxima_coords = []
+        maxima_values = []
+        
+        for b in range(batch_size):
+            # Convertir en numpy pour utiliser peak_local_max
+            att_map = attention_map[b, 0].cpu().numpy()
+            
+            # Trouver les maxima locaux
+            from skimage.feature import peak_local_max
+            coordinates = peak_local_max(
+                att_map,
+                min_distance=min_distance,
+                threshold_abs=threshold,
+                exclude_border=False
+            )
+            
+            # Récupérer les valeurs des maxima
+            values = torch.tensor([att_map[y, x] for y, x in coordinates], 
+                                device=attention_map.device)
+            
+            # Convertir en coordonnées (x, y)
+            coords = torch.tensor(coordinates[:, [1, 0]], device=attention_map.device)
+            
+            maxima_coords.append(coords)
+            maxima_values.append(values)
+        
+        return maxima_coords, maxima_values
