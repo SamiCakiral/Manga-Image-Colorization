@@ -71,14 +71,14 @@ The project includes:
 Results are automatically organized in:
 - Grayscale images
 - Colorized outputs
-- Original color images (if available)
+- Original color images
 - Side-by-side comparisons
 
 ## 🚨 Requirements
 
 - A Google account
 - Access to Google Colab
-- GPU runtime enabled (Settings > Hardware accelerator > GPU)
+- GPU runtime enabled (Settings > Hardware accelerator > GPU) (if you want to train a model, otherwise the CPU can run inferences)
 
 ## ⚠️ Important Notes
 
