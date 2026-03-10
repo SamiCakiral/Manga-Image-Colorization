@@ -95,3 +95,8 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 Feel free to submit issues and enhancement requests!
 
+## 📄 Paper
+
+This repository contains the implementation related to the following paper:
+
+https://doi.org/10.62520/fujece.1676853
